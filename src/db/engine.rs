@@ -1,0 +1,128 @@
+use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Result;
+use crate::db::constants::*;
+use crate::db::recovery::load_index;
+
+
+pub struct Database{
+  pub file : File,
+  pub index : HashMap<String, u64>,
+  pub current_offset : u64,
+}
+
+
+impl Database {
+
+  pub fn open(path : &str) -> Result<Self> {
+
+    let mut file = OpenOptions::new().create(true).read(true).write(true).open(path)?;
+
+    let mut index = HashMap::new();
+
+    let current_offset = load_index(&mut file, &mut index)?;
+
+    return Ok(Self{
+      file,
+      index,
+      current_offset
+    });
+  }
+
+  pub fn put(&mut self, key : &str, val : &str) -> Result<()>{
+    let key_bytes = key.as_bytes();
+    let val_bytes = val.as_bytes();
+    let key_len = key_bytes.len() as u32;
+    let val_len = val_bytes.len() as u32;
+    self.file.seek(SeekFrom::Start(self.current_offset))?;
+
+    self.file.write_all(&[PUT_ENTRY])?;
+
+    /////////////////////////////////////////////////////// Write key length
+    self.file.write_all(&key_len.to_le_bytes())?;
+
+
+    ////////////////////////////////////////////////////// Write key data/buf
+    self.file.write_all(key_bytes)?;
+
+    ////////////////////////////////////////////////////// Write val length
+    self.file.write_all(&val_len.to_le_bytes())?;
+
+    ///////////////////////////////////////////////////// Write val data/buf
+    self.file.write_all(val_bytes)?;
+
+
+    ////////////////////////// Force to write it on disk
+    self.file.sync_all()?;
+
+    self.index.insert(key.to_string(), self.current_offset);
+
+    ///////////////////////////////////////////////////// update next free offset
+    self.current_offset += 1 +
+        4 + key_bytes.len() as u64 +
+        4 + val_bytes.len() as u64;
+
+    Ok(())
+  }
+
+  pub fn get(&mut self, key : &str) -> Result<Option<String>> {
+
+    let does_key_exist_enum = self.index.get(key);
+    match does_key_exist_enum {
+      Some(v) => {
+        let offset = *v;
+
+        ////////////////////////////////////////////// Jump to the entry
+        self.file.seek(SeekFrom::Start(offset))?;
+
+        ///////////////////////////////////////////// Type of the Entry
+        let mut type_buf = [0u8 ; 1];
+        self.file.read_exact(&mut type_buf)?;
+        let entry_type = type_buf[0];
+        if entry_type != PUT_ENTRY {
+          return Ok(None);
+        } 
+
+        ///////////////////////////////////////////// Read key len
+        let mut key_len_buf = [0u8; 4];
+        self.file.read_exact(&mut key_len_buf)?;
+        let key_len = u32::from_le_bytes(key_len_buf) as u32;
+
+        ///////////////////////////////////////////// Read key data/buf
+        let mut key_buf = vec![0u8 ; key_len as usize];
+        self.file.read_exact(&mut key_buf)?;
+        
+        ///////////////////////////////////////////// Read val len
+        let mut val_len_buf = [0u8; 4];
+        self.file.read_exact(&mut val_len_buf)?;
+        let val_len = u32::from_le_bytes(val_len_buf) as u32;
+
+        //////////////////////////////////////////// Read val data/buf
+        let mut value_buf = vec![0u8 ; val_len as usize];
+        self.file.read_exact(&mut value_buf)?;
+        let value = String::from_utf8(value_buf).unwrap();
+
+        return Ok(Some(value));
+      },
+      None => return Ok(None),
+    }
+  }
+  pub fn delete(&mut self, key : &str) -> Result<()> {
+    
+    let key_bytes = key.as_bytes();
+    let key_len = key_bytes.len() as u32;
+    self.file.seek(SeekFrom::Start(self.current_offset))?;
+    self.file.write_all(&[DELETE_ENTRY])?;
+    self.file.write_all(&key_len.to_le_bytes())?;
+    self.file.write_all(key_bytes)?;
+    self.file.sync_all()?;
+    self.index.remove(key);
+    self.current_offset +=
+    1 +
+    4 +
+    key_bytes.len() as u64;
+    Ok(())
+  }
+  
+}
