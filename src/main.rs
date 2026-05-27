@@ -196,21 +196,203 @@ impl Database{
     key_bytes.len() as u64;
     Ok(())
   }
+
+  fn compaction(&mut self) -> Result<()>{
+    let mut compact_file = OpenOptions::new()
+    .create(true)
+    .write(true)
+    .truncate(true)
+    .open("db.compact")?;
+
+    let mut new_index:HashMap<String, u64> = HashMap::new();
+    let mut new_offset = 0;
+    
+    for(key, _old_offset) in self.index.clone() {
+      let value = self.get(&key)?.unwrap();
+
+      compact_file.write_all(&[PUT_ENTRY])?;
+
+
+      let key_bytes = key.as_bytes();
+      let key_len = key_bytes.len() as u32;
+      compact_file.write_all(&key_len.to_le_bytes())?;
+      compact_file.write_all(key_bytes)?;
+
+      let value_bytes  = value.as_bytes();
+      let value_len = value_bytes.len() as u32;
+      compact_file.write_all(&value_len.to_le_bytes())?;
+      compact_file.write_all(value_bytes)?;
+
+      new_index.insert(
+        key.clone(),
+        new_offset,
+      );
+
+      new_offset +=
+      1 +
+      4 + key_bytes.len() as u64 +
+      4 + value_bytes.len() as u64;
+
+      compact_file.sync_all()?;
+    }
+    drop(compact_file);
+
+      std::fs::rename(
+        "db.compact",
+        "db.log"
+      )?;
+
+      self.file = OpenOptions::new()
+      .read(true)
+      .write(true)
+      .open("db.log")?;
+
+      self.index = new_index;
+      self.current_offset = new_offset;
+    Ok(())
+  }
 }
 
 fn main() -> Result<()> {
 
-    let mut db =
-        Database::open("db.log")?;
+    // -----------------------------------
+    // REMOVE OLD DATABASE FOR CLEAN TEST
+    // -----------------------------------
+    let _ = std::fs::remove_file("db.log");
+    let _ = std::fs::remove_file("db.compact");
+
+    // -----------------------------------
+    // OPEN DATABASE
+    // -----------------------------------
+    let mut db = Database::open("db.log")?;
+
+    // -----------------------------------
+    // PUT TESTS
+    // -----------------------------------
+    println!("\n========== PUT TESTS ==========\n");
 
     db.put("name", "Aniket")?;
     db.put("age", "19")?;
-    db.put("name", "Sen")?;
-    db.delete("name")?;
+    db.put("city", "Bhopal")?;
 
-println!("{:?}", db.get("name")?);
-    println!("{:?}", db.get("name")?);
-    println!("{:?}", db.get("age")?);
+    println!("Inserted:");
+    println!("name -> Aniket");
+    println!("age  -> 19");
+    println!("city -> Bhopal");
+
+    // -----------------------------------
+    // GET TESTS
+    // -----------------------------------
+    println!("\n========== GET TESTS ==========\n");
+
+    println!("name => {:?}", db.get("name")?);
+    println!("age  => {:?}", db.get("age")?);
+    println!("city => {:?}", db.get("city")?);
+
+    // -----------------------------------
+    // UPDATE TEST
+    // -----------------------------------
+    println!("\n========== UPDATE TEST ==========\n");
+
+    db.put("name", "Sen")?;
+
+    println!("Updated:");
+    println!("name -> Sen");
+
+    println!("name => {:?}", db.get("name")?);
+
+    // -----------------------------------
+    // DELETE TEST
+    // -----------------------------------
+    println!("\n========== DELETE TEST ==========\n");
+
+    db.delete("age")?;
+
+    println!("Deleted:");
+    println!("age");
+
+    println!("age => {:?}", db.get("age")?);
+
+    // -----------------------------------
+    // SHOW INDEX BEFORE COMPACTION
+    // -----------------------------------
+    println!("\n========== INDEX BEFORE COMPACTION ==========\n");
+
+    println!("{:#?}", db.index);
+
+    // -----------------------------------
+    // FILE SIZE BEFORE COMPACTION
+    // -----------------------------------
+    let before_size =
+        std::fs::metadata("db.log")?.len();
+
+    println!(
+        "db.log size before compaction: {} bytes",
+        before_size
+    );
+
+    // -----------------------------------
+    // COMPACTION TEST
+    // -----------------------------------
+    println!("\n========== COMPACTION ==========\n");
+
+    db.compaction()?;
+
+    println!("Compaction completed!");
+
+    // -----------------------------------
+    // FILE SIZE AFTER COMPACTION
+    // -----------------------------------
+    let after_size =
+        std::fs::metadata("db.log")?.len();
+
+    println!(
+        "db.log size after compaction: {} bytes",
+        after_size
+    );
+
+    // -----------------------------------
+    // VERIFY DATA AFTER COMPACTION
+    // -----------------------------------
+    println!("\n========== VERIFY AFTER COMPACTION ==========\n");
+
+    println!("name => {:?}", db.get("name")?);
+    println!("age  => {:?}", db.get("age")?);
+    println!("city => {:?}", db.get("city")?);
+
+    // -----------------------------------
+    // RESTART RECOVERY TEST
+    // -----------------------------------
+    println!("\n========== RESTART RECOVERY TEST ==========\n");
+
+    drop(db);
+
+    let mut recovered_db =
+        Database::open("db.log")?;
+
+    println!("Recovered values:");
+
+    println!(
+        "name => {:?}",
+        recovered_db.get("name")?
+    );
+
+    println!(
+        "age => {:?}",
+        recovered_db.get("age")?
+    );
+
+    println!(
+        "city => {:?}",
+        recovered_db.get("city")?
+    );
+
+    // -----------------------------------
+    // FINAL INDEX
+    // -----------------------------------
+    println!("\n========== FINAL INDEX ==========\n");
+
+    println!("{:#?}", recovered_db.index);
 
     Ok(())
 }
