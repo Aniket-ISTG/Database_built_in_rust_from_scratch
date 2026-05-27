@@ -3,6 +3,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::io::Result;
 
+
+const PUT_ENTRY: u8 = 1;
+const DELETE_ENTRY: u8 = 2;
 struct Database{
   file : File,
   index : HashMap<String, u64>,
@@ -36,6 +39,14 @@ impl Database{
       // now that someOffsetNumberOrAddress ----points_to-----> actual data in the disk 
       // [keyLength][key][valueLength][value]
 
+      /////////////////////////////////////////// Read the type of entry
+      let mut type_buf = [0u8; 1];
+      if let Err(_) = file.read_exact(&mut type_buf) {
+          break;
+      }
+
+      let entry_type = type_buf[0];
+
       //////////////////////////////////////////// Reading key length
       let mut key_len_buf = [0u8; 4];
 
@@ -44,7 +55,7 @@ impl Database{
         break;  
       }
 
-      
+
       let key_len = u32::from_le_bytes(key_len_buf) as u32;
 
 
@@ -54,19 +65,35 @@ impl Database{
       let key = String::from_utf8(key_buf).unwrap();
 
 
-      //////////////////////////////////////////// Reading value length
-      let mut val_len_buf = [0u8; 4];
-      file.read_exact(&mut val_len_buf)?;
-      let val_length = u32::from_le_bytes(val_len_buf) as u32;
+      if entry_type == PUT_ENTRY {
 
-      //////////////////////////////////////////// Skiping value
-      let mut value_buf = vec![0u8; val_length as usize];
-      file.read_exact(&mut value_buf)?;
+        let mut val_len_buf = [0u8; 4];
+        file.read_exact(&mut val_len_buf)?;
 
-      // latest offset wins
-      index.insert(key, offset);
+        let val_length =
+            u32::from_le_bytes(val_len_buf) as u32;
 
-      offset += 4 + key_len as u64 + 4 +  val_length as u64;
+        let mut value_buf =
+            vec![0u8; val_length as usize];
+
+        file.read_exact(&mut value_buf)?;
+
+        index.insert(key, offset);
+
+        offset +=
+            1 +
+            4 + key_len as u64 +
+            4 + val_length as u64;
+
+      } else if entry_type == DELETE_ENTRY {
+
+          index.remove(&key);
+
+          offset +=
+              1 +
+              4 + key_len as u64;
+        }
+
     }
     
     return Ok(offset);
@@ -79,6 +106,8 @@ impl Database{
     let key_len = key_bytes.len() as u32;
     let val_len = val_bytes.len() as u32;
     self.file.seek(SeekFrom::Start(self.current_offset))?;
+
+    self.file.write_all(&[PUT_ENTRY])?;
 
     /////////////////////////////////////////////////////// Write key length
     self.file.write_all(&key_len.to_le_bytes())?;
@@ -100,7 +129,7 @@ impl Database{
     self.index.insert(key.to_string(), self.current_offset);
 
     ///////////////////////////////////////////////////// update next free offset
-    self.current_offset +=
+    self.current_offset += 1 +
         4 + key_bytes.len() as u64 +
         4 + val_bytes.len() as u64;
 
@@ -116,6 +145,14 @@ impl Database{
 
         ////////////////////////////////////////////// Jump to the entry
         self.file.seek(SeekFrom::Start(offset))?;
+
+        ///////////////////////////////////////////// Type of the Entry
+        let mut type_buf = [0u8 ; 1];
+        self.file.read_exact(&mut type_buf)?;
+        let entry_type = type_buf[0];
+        if entry_type != PUT_ENTRY {
+          return Ok(None);
+        } 
 
         ///////////////////////////////////////////// Read key len
         let mut key_len_buf = [0u8; 4];
@@ -142,6 +179,23 @@ impl Database{
     }
 
   }
+
+  fn delete(&mut self, key : &str) -> Result<()> {
+    
+    let key_bytes = key.as_bytes();
+    let key_len = key_bytes.len() as u32;
+    self.file.seek(SeekFrom::Start(self.current_offset))?;
+    self.file.write_all(&[DELETE_ENTRY])?;
+    self.file.write_all(&key_len.to_le_bytes())?;
+    self.file.write_all(key_bytes)?;
+    self.file.sync_all()?;
+    self.index.remove(key);
+    self.current_offset +=
+    1 +
+    4 +
+    key_bytes.len() as u64;
+    Ok(())
+  }
 }
 
 fn main() -> Result<()> {
@@ -152,7 +206,9 @@ fn main() -> Result<()> {
     db.put("name", "Aniket")?;
     db.put("age", "19")?;
     db.put("name", "Sen")?;
+    db.delete("name")?;
 
+println!("{:?}", db.get("name")?);
     println!("{:?}", db.get("name")?);
     println!("{:?}", db.get("age")?);
 
