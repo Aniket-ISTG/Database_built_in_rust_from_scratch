@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::io::Result;
-use crate::db::constants::*;
+use crate::db::{constants::*, entry};
 use crate::db::engine::Database;
+use crate::db::entry::Entry;
 
 impl Database {
   pub fn compaction(&mut self) -> Result<()>{
@@ -18,19 +19,9 @@ impl Database {
     
     for(key, _old_offset) in self.index.clone() {
       let value = self.get(&key)?.unwrap();
-
-      compact_file.write_all(&[PUT_ENTRY])?;
-
-
-      let key_bytes = key.as_bytes();
-      let key_len = key_bytes.len() as u32;
-      compact_file.write_all(&key_len.to_le_bytes())?;
-      compact_file.write_all(key_bytes)?;
-
-      let value_bytes  = value.as_bytes();
-      let value_len = value_bytes.len() as u32;
-      compact_file.write_all(&value_len.to_le_bytes())?;
-      compact_file.write_all(value_bytes)?;
+      let entry = Entry::new(PUT_ENTRY, key.clone(), Some(value.clone()));
+      let entry_bytes = entry.serialize();
+      compact_file.write_all(&entry_bytes)?;
 
       new_index.insert(
         key.clone(),
@@ -39,8 +30,8 @@ impl Database {
 
       new_offset +=
       1 +
-      4 + key_bytes.len() as u64 +
-      4 + value_bytes.len() as u64;
+      4 + key.as_bytes().len() as u64 +
+      4 + value.as_bytes().len() as u64;
 
       compact_file.sync_all()?;
     }

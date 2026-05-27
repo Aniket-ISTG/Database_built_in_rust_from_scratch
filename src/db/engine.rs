@@ -3,6 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::io::Result;
 use crate::db::constants::*;
+use crate::db::entry::Entry;
 use crate::db::recovery::load_index;
 
 
@@ -37,20 +38,18 @@ impl Database {
     let val_len = val_bytes.len() as u32;
     self.file.seek(SeekFrom::Start(self.current_offset))?;
 
-    self.file.write_all(&[PUT_ENTRY])?;
+    let entry  = Entry::new(PUT_ENTRY, key.to_string(), Some(val.to_string()));
+    let serialized_entry = entry.serialize();
+    self.file.write_all(&serialized_entry)?;
 
     /////////////////////////////////////////////////////// Write key length
-    self.file.write_all(&key_len.to_le_bytes())?;
 
 
     ////////////////////////////////////////////////////// Write key data/buf
-    self.file.write_all(key_bytes)?;
 
     ////////////////////////////////////////////////////// Write val length
-    self.file.write_all(&val_len.to_le_bytes())?;
 
     ///////////////////////////////////////////////////// Write val data/buf
-    self.file.write_all(val_bytes)?;
 
 
     ////////////////////////// Force to write it on disk
@@ -113,9 +112,12 @@ impl Database {
     let key_bytes = key.as_bytes();
     let key_len = key_bytes.len() as u32;
     self.file.seek(SeekFrom::Start(self.current_offset))?;
-    self.file.write_all(&[DELETE_ENTRY])?;
-    self.file.write_all(&key_len.to_le_bytes())?;
-    self.file.write_all(key_bytes)?;
+
+    let entry = Entry::new(DELETE_ENTRY, key.to_string(), None);
+    let serialized_entry = entry.serialize();
+    self.file.write_all(&serialized_entry)?;
+
+
     self.file.sync_all()?;
     self.index.remove(key);
     self.current_offset +=
