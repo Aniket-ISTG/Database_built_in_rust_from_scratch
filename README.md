@@ -13,7 +13,7 @@ Instead of relying on existing databases, this project focuses on implementing t
 * Log compaction to reclaim disk space
 * Custom binary serialization format
 * Simple query parser and CLI
-* Range query support
+* Range query support (yet to add)
 
 ## Why I Built This
 
