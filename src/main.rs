@@ -1,7 +1,10 @@
 mod db;
+mod tree;
+mod query_parser;
 
 use db::engine::Database;
-
+use query_parser::parser::parse;
+use query_parser::actions::Command;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // -----------------------------------
@@ -142,6 +145,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n========== FINAL INDEX ==========\n");
 
     println!("{:#?}", recovered_db.index);
+
+
+
+    println!("Now run your own queries using the query parser!");
+    println!("Example:");
+    println!("> INSERT name Aniket");
+    println!("> GET name");
+    println!("> DELETE name"); 
+    loop {
+        println!("\nEnter a command (INSERT, GET, DELETE) or 'exit' to quit:");
+        std::io::Write::flush(&mut std::io::stdout())?;
+        
+        let mut input: String = String::new();
+        std::io::stdin().read_line(&mut input)?;
+
+        match parse(&input) {
+            Some(cmd) => {
+                if matches!(cmd, Command::Exit) {
+                    println!("Exiting...");
+                    break;
+                }
+                query_parser::execute::execute(cmd, &mut recovered_db);
+            },
+            None => eprintln!("Invalid command. Please try again."),
+        }
+    }
 
     Ok(())
 }

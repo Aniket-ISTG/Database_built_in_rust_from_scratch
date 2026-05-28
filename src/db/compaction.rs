@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::OpenOptions;
+use std::io::{Seek, SeekFrom, Write};
 use std::io::Result;
-use crate::db::{constants::*, entry};
+use crate::db::constants::*;
 use crate::db::engine::Database;
 use crate::db::entry::Entry;
+use crate::tree::btree::BTree;
 
 impl Database {
   pub fn compaction(&mut self) -> Result<()>{
@@ -14,10 +14,11 @@ impl Database {
     .truncate(true)
     .open("db.compact")?;
 
-    let mut new_index:HashMap<String, u64> = HashMap::new();
+    let mut new_index = BTree::new(3);
     let mut new_offset = 0;
     
-    for(key, _old_offset) in self.index.clone() {
+    // traverse() returns entries in sorted order
+    for (key, _old_offset) in self.index.traverse() {
       let value = self.get(&key)?.unwrap();
       let entry = Entry::new(PUT_ENTRY, key.clone(), Some(value.clone()));
       let entry_bytes = entry.serialize();

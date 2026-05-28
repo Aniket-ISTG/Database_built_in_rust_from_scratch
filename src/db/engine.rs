@@ -1,15 +1,15 @@
-use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::io::Result;
 use crate::db::constants::*;
 use crate::db::entry::Entry;
 use crate::db::recovery::load_index;
+use crate::tree::btree::BTree;
 
 
 pub struct Database{
   pub file : File,
-  pub index : HashMap<String, u64>,
+  pub index : BTree,
   pub current_offset : u64,
 }
 
@@ -20,7 +20,7 @@ impl Database {
 
     let mut file = OpenOptions::new().create(true).read(true).write(true).open(path)?;
 
-    let mut index = HashMap::new();
+    let mut index = BTree::new(3);
 
     let current_offset = load_index(&mut file, &mut index)?;
 
@@ -34,23 +34,11 @@ impl Database {
   pub fn put(&mut self, key : &str, val : &str) -> Result<()>{
     let key_bytes = key.as_bytes();
     let val_bytes = val.as_bytes();
-    let key_len = key_bytes.len() as u32;
-    let val_len = val_bytes.len() as u32;
     self.file.seek(SeekFrom::Start(self.current_offset))?;
 
     let entry  = Entry::new(PUT_ENTRY, key.to_string(), Some(val.to_string()));
     let serialized_entry = entry.serialize();
     self.file.write_all(&serialized_entry)?;
-
-    /////////////////////////////////////////////////////// Write key length
-
-
-    ////////////////////////////////////////////////////// Write key data/buf
-
-    ////////////////////////////////////////////////////// Write val length
-
-    ///////////////////////////////////////////////////// Write val data/buf
-
 
     ////////////////////////// Force to write it on disk
     self.file.sync_all()?;
@@ -67,11 +55,9 @@ impl Database {
 
   pub fn get(&mut self, key : &str) -> Result<Option<String>> {
 
-    let does_key_exist_enum = self.index.get(key);
-    match does_key_exist_enum {
-      Some(v) => {
-        let offset = *v;
-
+    let offset_opt = self.index.get(key);
+    match offset_opt {
+      Some(offset) => {
         ////////////////////////////////////////////// Jump to the entry
         self.file.seek(SeekFrom::Start(offset))?;
 
@@ -110,7 +96,6 @@ impl Database {
   pub fn delete(&mut self, key : &str) -> Result<()> {
     
     let key_bytes = key.as_bytes();
-    let key_len = key_bytes.len() as u32;
     self.file.seek(SeekFrom::Start(self.current_offset))?;
 
     let entry = Entry::new(DELETE_ENTRY, key.to_string(), None);
@@ -123,7 +108,8 @@ impl Database {
     self.current_offset +=
     1 +
     4 +
-    key_bytes.len() as u64;
+    key_bytes.len() as u64 +
+    4; // and value length field(0)
     Ok(())
   }
   

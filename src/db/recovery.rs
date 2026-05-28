@@ -1,19 +1,14 @@
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::io::Result;
 use crate::db::constants::*;
+use crate::tree::btree::BTree;
 
-  pub fn load_index(file : &mut File, index : &mut HashMap<String, u64>) -> Result<u64>{
+  pub fn load_index(file : &mut File, index : &mut BTree) -> Result<u64>{
     let mut offset = 0;
     file.seek(SeekFrom::Start(0))?;
 
     loop{
-      // for now format is :
-      // for index.put("xyz", someOffsetNumberOrAddress)
-      // now that someOffsetNumberOrAddress ----points_to-----> actual data in the disk 
-      // [keyLength][key][valueLength][value]
-
       /////////////////////////////////////////// Read the type of entry
       let mut type_buf = [0u8; 1];
       if let Err(_) = file.read_exact(&mut type_buf) {
@@ -66,7 +61,8 @@ use crate::db::constants::*;
 
           offset +=
               1 +
-              4 + key_len as u64;
+              4 + key_len as u64 +
+              4; // value length field (0)
         }
 
     }
